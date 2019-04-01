@@ -1,0 +1,127 @@
+#version 430
+
+struct Overflow {
+	float one,two;
+};
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(r32f) uniform writeonly image3D densityTexOut;
+layout(r32f) uniform readonly image3D densityTexIn;
+layout(r32f) uniform writeonly image3D overflowTexOut;
+layout(r32f) uniform readonly image3D overflowTexIn;
+uniform int readOverflow;
+uniform int GRID_SIZE;
+
+void main() {
+	ivec3 myPos = ivec3(gl_GlobalInvocationID.xyz);
+	ivec3 readPos = ivec3(gl_GlobalInvocationID.xyz);
+	float densInVal = imageLoad(densityTexIn,myPos).x;
+	float overFlow = 0.0f;
+	float densStoreVal = 0.0f;
+	float densPush = 0.0f;
+	
+	int divVal = 1;
+	bool gotVal = false;
+	if (readOverflow == 1 || readOverflow == 2) {
+		if (gl_GlobalInvocationID.y > 0) {
+			if (gl_GlobalInvocationID.x == 0 || gl_GlobalInvocationID.x == GRID_SIZE-1){
+				readPos.x = myPos.x;
+				if (gl_GlobalInvocationID.z > 0){
+					readPos.z = myPos.z-1;
+					overFlow += imageLoad(overflowTexIn,readPos).x;
+					gotVal = true;
+					divVal = 2;
+				}
+				if (gl_GlobalInvocationID.z < GRID_SIZE-1){
+					readPos.z = myPos.z+1;
+					overFlow += imageLoad(overflowTexIn,readPos).x;
+					gotVal = true;
+					divVal = 2;
+				}
+			}
+			if (gl_GlobalInvocationID.z == 0 || gl_GlobalInvocationID.z == GRID_SIZE-1){
+				readPos.z = myPos.z;
+				
+				if (gl_GlobalInvocationID.x > 0){
+					readPos.x = myPos.x-1;
+					overFlow += imageLoad(overflowTexIn,readPos).x;
+					gotVal = true;
+					divVal = 2;
+				}
+				if (gl_GlobalInvocationID.x < GRID_SIZE-1){
+					readPos.x = myPos.x+1;
+					overFlow += imageLoad(overflowTexIn,readPos).x;
+					gotVal = true;
+					divVal = 2;
+				}
+			}
+			if (!gotVal) {
+				readPos.y = myPos.y-1;
+				overFlow += imageLoad(overflowTexIn,readPos).x;
+			}
+		}
+		/*
+		overFlow += imageLoad(overflowTexIn,readPos).x*4.0f;
+		if (myPos.x > 0){
+			readPos.x = myPos.x-1;
+			overFlow += imageLoad(overflowTexIn,readPos).x*2.0f;
+			divVal+=2;
+			if (myPos.z > 0){
+				readPos.z = myPos.z-1;
+				overFlow += imageLoad(overflowTexIn,readPos).x;
+				divVal+=1;
+			}
+			if (myPos.z < GRID_SIZE-1){
+				readPos.z = myPos.z+1;
+				overFlow += imageLoad(overflowTexIn,readPos).x;
+				divVal+=1;
+			}
+		}
+		if (myPos.x < GRID_SIZE-1){
+			readPos.x = myPos.x+1;
+			readPos.z = myPos.z;
+			overFlow += imageLoad(overflowTexIn,readPos).x*2.0f;
+			divVal+=2;
+			if (myPos.z > 0){
+				readPos.z = myPos.z-1;
+				overFlow += imageLoad(overflowTexIn,readPos).x;
+				divVal+=1;
+			}
+			if (myPos.z < GRID_SIZE-1){
+				readPos.z = myPos.z+1;
+				overFlow += imageLoad(overflowTexIn,readPos).x;
+				divVal+=1;
+			}
+		}
+		readPos.x = myPos.x;
+		if (myPos.z > 0){
+			readPos.z = myPos.z-1;
+			overFlow += imageLoad(overflowTexIn,readPos).x*2.0f;
+			divVal+=2;
+				
+		}
+		if (myPos.z < GRID_SIZE-1){
+			readPos.z = myPos.z+1;
+			overFlow += imageLoad(overflowTexIn,readPos).x*2.0f;
+			divVal+=2;
+		}
+		*/
+	}
+
+	overFlow = overFlow/float(divVal);
+	if (readOverflow == 2) densStoreVal = densInVal + overFlow;
+	else {
+		if (densInVal > 1){
+			densStoreVal = 1.0f + overFlow;
+			densPush = densInVal - 1;
+		}
+		else {
+			densStoreVal = densInVal + overFlow;
+		}
+	}
+		
+
+	imageStore(densityTexOut,myPos,vec4(densStoreVal,0.0f,0.0f,0.0f));
+	imageStore(overflowTexOut,myPos,vec4(densPush,0.0f,0.0f,0.0f));
+
+}

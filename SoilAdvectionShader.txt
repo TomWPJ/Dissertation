@@ -1,0 +1,144 @@
+#version 430
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(r32f) uniform readonly image3D densityTexIn;
+layout(r32f) uniform writeonly image3D densityTexOut;
+layout(rgba32f) uniform readonly image3D velocityTexIn;
+layout(rgba32f) uniform writeonly image3D velocityTexOut;
+uniform float timeStep;
+uniform int GRID_SIZE;
+uniform vec3 windVelocity;
+uniform float voxelLim;
+
+bool boundsCheck(ivec3 v1){
+	if (v1.x > GRID_SIZE-1 || v1.x < 0) return false;
+	if (v1.y > GRID_SIZE-1 || v1.y < 0) return false;
+	if (v1.z > GRID_SIZE-1 || v1.z < 0) return false;
+	return true;
+}
+
+vec3 windCheck(ivec3 myPos){
+	vec3 retVal = vec3(0.0f,0.0f,0.0f);
+	if (windVelocity.x > 0){
+		if (myPos.x == 0) retVal.x = windVelocity.x;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x-1,myPos.y,myPos.z)).x;
+			if (densCheck == 0) retVal.x = windVelocity.x;
+		}
+	}
+	else if (windVelocity.x < 0){
+		if (myPos.x == GRID_SIZE-1) retVal.x = windVelocity.x;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x+1,myPos.y,myPos.z)).x;
+			if (densCheck == 0) retVal.x = windVelocity.x;
+		}
+	}
+
+	if (windVelocity.y > 0){
+		if (myPos.y == 0) retVal.y = windVelocity.y;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x,myPos.y-1,myPos.z)).x;
+			if (densCheck == 0) retVal.y = windVelocity.y;
+		}
+	}
+	else if (windVelocity.y < 0){
+		if (myPos.y == GRID_SIZE-1) retVal.y = windVelocity.y;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x,myPos.y+1,myPos.z)).x;
+			if (densCheck == 0) retVal.y = windVelocity.y;
+		}
+	}
+
+	if (windVelocity.z > 0){
+		if (myPos.z == 0) retVal.z = windVelocity.z;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x,myPos.y,myPos.z-1)).x;
+			if (densCheck == 0) retVal.z = windVelocity.z;
+		}
+	}
+	else if (windVelocity.z < 0){
+		if (myPos.z == GRID_SIZE-1) retVal.z = windVelocity.z;
+		else {
+			float densCheck = imageLoad(densityTexIn,ivec3(myPos.x,myPos.y,myPos.z+1)).x;
+			if (densCheck == 0) retVal.z = windVelocity.z;
+		}
+	}
+
+	return retVal;
+}
+
+vec3 velocityLimCheck(vec3 v1){
+	vec3 newVelVec = v1;
+	if (v1.x > voxelLim) newVelVec.x = voxelLim;
+	else if (v1.x < -voxelLim) newVelVec.x = -voxelLim;
+	if (v1.y > voxelLim) newVelVec.y = voxelLim;
+	else if (v1.y < -voxelLim) newVelVec.y = -voxelLim;
+	if (v1.z > voxelLim) newVelVec.z = voxelLim;
+	else if (v1.z < -voxelLim) newVelVec.z = -voxelLim;
+	return newVelVec;
+}
+
+float overlap(float x1, float x2){
+	return 1 - min(1,abs(x1-x2));
+}
+
+float distrib(ivec3 fromPos, ivec3 toPos){
+	vec3 vVal = imageLoad(velocityTexIn,fromPos).xyz;
+	vVal = velocityLimCheck(vVal*timeStep);
+	return overlap(fromPos.x + vVal.x,toPos.x)*overlap(fromPos.y + vVal.y,toPos.y)*overlap(fromPos.z + vVal.z,toPos.z);
+}
+
+float inFlow(ivec3 fromPos, ivec3 toPos){
+	float inDens = imageLoad(densityTexIn,fromPos).x;
+	return (inDens * distrib(fromPos,toPos));
+}
+
+float backFlow(ivec3 fromPos, ivec3 toPos){
+	if (all(equal(fromPos, toPos))) return 0.0f;
+	if (boundsCheck(fromPos)){
+		float densVal = imageLoad(densityTexIn,fromPos).x;
+		if (densVal < 1) return 0.0f;
+		else return inFlow(toPos,fromPos);
+	}
+	else return inFlow(toPos,fromPos);
+}
+
+
+void main() {
+	float netIn = 0.0f;
+	float netBack = 0.0f;
+	ivec3 centrePos = ivec3(gl_GlobalInvocationID.xyz);
+	ivec3 checkPos;
+	float inD;
+	float dSum = 0.0f;
+	int voxLim = int(voxelLim);
+	vec3 vSum = vec3(0.0f,0.0f,0.0f);
+	vec3 OUTVAL = vec3(0.0f,0.0f,0.0f);
+	for (int i=-voxLim;i<=voxLim;i++){
+		for (int j=-voxLim;j<=voxLim;j++){
+			for (int k=-voxLim;k<=voxLim;k++){
+				checkPos = ivec3(centrePos.x+i,centrePos.y+j,centrePos.z+k);
+				inD = inFlow(checkPos,centrePos);
+				if (inD != 0){
+					vSum += imageLoad(velocityTexIn,checkPos).xyz * inD;
+					dSum += inD;
+				}
+				netIn += inD;
+				netBack += backFlow(checkPos,centrePos);
+			}
+		}
+	}
+	float centreDens = imageLoad(densityTexIn,centrePos).x;
+	float newDens = 0.0f;
+	if (centreDens < 1) newDens = netIn + netBack;
+	else newDens = inFlow(centrePos,centrePos) + netBack;
+	vec3 newVel = vec3(0.0f,0.0f,0.0f);
+	if (dSum != 0){
+		newVel = vSum / dSum;
+	}
+	
+	vec3 gVec = vec3(0.0f,-9.8f,0.0f);
+	if (newDens != 0) newVel += gVec*timeStep + timeStep*windCheck(centrePos);
+	imageStore(densityTexOut, centrePos, vec4(newDens,0.0f,0.0f,0.0f ));
+	imageStore(velocityTexOut, centrePos, vec4(newVel,0.0f ));
+}

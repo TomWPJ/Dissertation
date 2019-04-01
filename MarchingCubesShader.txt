@@ -1,0 +1,92 @@
+#version 430
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(std430, binding = 1) writeonly buffer Tris {float triangleBuffer[];};
+layout(r32f) uniform readonly image3D densityTexIn;
+layout(std430, binding = 2) readonly buffer Ttab {int triTable[256][16];};
+layout(std430, binding = 3) readonly buffer Etab {int edgeTable[256];};
+uniform int GRID_SIZE;
+vec3 VertexInterp(ivec3 p1,ivec3 p2,float valp1,float valp2){
+	float mu;
+	vec3 p;
+	if (abs(0.5f - valp1) < 0.00001) return(vec3(p1.xyz));
+	if (abs(0.5f - valp2) < 0.00001) return(vec3(p2.xyz));
+	if (abs(valp1 - valp2) < 0.00001) return(vec3(p1.xyz));
+	mu = (0.5f - valp1) / (valp2 - valp1);
+	p.x = p1.x + mu * (p2.x - p1.x);
+	p.y = p1.y + mu * (p2.y - p1.y);
+	p.z = p1.z + mu * (p2.z - p1.z);
+	return(p);
+}
+void main() {
+	if (gl_GlobalInvocationID.x != GRID_SIZE-1 && gl_GlobalInvocationID.y != GRID_SIZE-1 && gl_GlobalInvocationID.z != GRID_SIZE-1){
+		ivec3 Texcoord = ivec3(gl_GlobalInvocationID.xyz);
+		int cubeindex = 0;
+		vec3 initVec = vec3(-1.0f,-1.0f,-1.0f);
+		vec3 vertlist[12] = {initVec,initVec,initVec,initVec,initVec,initVec,initVec,initVec,initVec,initVec,initVec,initVec};
+		float isoVals[8];
+		ivec3 gridPoints[8] = {
+			Texcoord,
+			ivec3(Texcoord.x+1,Texcoord.y  ,Texcoord.z  ),
+			ivec3(Texcoord.x+1,Texcoord.y+1,Texcoord.z  ),
+			ivec3(Texcoord.x  ,Texcoord.y+1,Texcoord.z  ),
+			ivec3(Texcoord.x  ,Texcoord.y  ,Texcoord.z+1),
+			ivec3(Texcoord.x+1,Texcoord.y  ,Texcoord.z+1),
+			ivec3(Texcoord.x+1,Texcoord.y+1,Texcoord.z+1),
+			ivec3(Texcoord.x  ,Texcoord.y+1,Texcoord.z+1)
+		};
+		for (int i = 0;i<8;i++){
+			isoVals[i] = imageLoad(densityTexIn,gridPoints[i]).x;
+		}
+		if (isoVals[0] < 0.5) cubeindex |= 1;
+		if (isoVals[1] < 0.5) cubeindex |= 2;
+		if (isoVals[2] < 0.5) cubeindex |= 4;
+		if (isoVals[3] < 0.5) cubeindex |= 8;
+		if (isoVals[4] < 0.5) cubeindex |= 16;
+		if (isoVals[5] < 0.5) cubeindex |= 32;
+		if (isoVals[6] < 0.5) cubeindex |= 64;
+		if (isoVals[7] < 0.5) cubeindex |= 128;
+		int edgeVal = edgeTable[cubeindex];
+		if (edgeVal == 0) {
+			for (int i = 0;i<5;i++){
+				for (int j = 0;j<3;j++){
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3] = -1.0f;
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 1] = -1.0f;
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 2] = -1.0f;
+				}
+			}
+		}
+		else {
+			if ((edgeVal & 1) == 1){ vertlist[0] = VertexInterp(gridPoints[0],gridPoints[1],isoVals[0],isoVals[1]);}
+			if ((edgeVal & 2) == 2){ vertlist[1] = VertexInterp(gridPoints[1],gridPoints[2],isoVals[1],isoVals[2]);}
+			if ((edgeVal & 4) == 4){ vertlist[2] = VertexInterp(gridPoints[2],gridPoints[3],isoVals[2],isoVals[3]);}
+			if ((edgeVal & 8) == 8){ vertlist[3] = VertexInterp(gridPoints[3],gridPoints[0],isoVals[3],isoVals[0]);}
+			if ((edgeVal & 16) == 16){ vertlist[4] = VertexInterp(gridPoints[4],gridPoints[5],isoVals[4],isoVals[5]);}
+			if ((edgeVal & 32) == 32){ vertlist[5] = VertexInterp(gridPoints[5],gridPoints[6],isoVals[5],isoVals[6]);}
+			if ((edgeVal & 64) == 64){ vertlist[6] = VertexInterp(gridPoints[6],gridPoints[7],isoVals[6],isoVals[7]);}
+			if ((edgeVal & 128) == 128){ vertlist[7] = VertexInterp(gridPoints[7],gridPoints[4],isoVals[7],isoVals[4]);}
+			if ((edgeVal & 256) == 256){ vertlist[8] = VertexInterp(gridPoints[0],gridPoints[4],isoVals[0],isoVals[4]);}
+			if ((edgeVal & 512) == 512){ vertlist[9] = VertexInterp(gridPoints[1],gridPoints[5],isoVals[1],isoVals[5]);}
+			if ((edgeVal & 1024) == 1024){ vertlist[10] = VertexInterp(gridPoints[2],gridPoints[6],isoVals[2],isoVals[6]);}
+			if ((edgeVal & 2048) == 2048){ vertlist[11] = VertexInterp(gridPoints[3],gridPoints[7],isoVals[3],isoVals[7]);}
+			for (int i = 0;i<5;i++){
+				for (int j = 0;j<3;j++){
+					int indexVal = triTable[cubeindex][i*3+j];
+					vec3 pointVal = vec3(-1.0f,-1.0f,-1.0f);
+					if (indexVal != -1){ pointVal = vertlist[indexVal];}
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3] = pointVal.x;
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 1] = pointVal.y;
+					triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 2] = pointVal.z;
+				}
+			}
+		}
+	}
+	else {
+		for (int i = 0;i<5;i++){
+			for (int j = 0;j<3;j++){
+				triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3] = -1.0f;
+				triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 1] = -1.0f;
+				triangleBuffer[(gl_GlobalInvocationID.x+gl_GlobalInvocationID.y*GRID_SIZE+gl_GlobalInvocationID.z*GRID_SIZE*GRID_SIZE)*5*9 + i*9 + j*3 + 2] = -1.0f;
+			}
+		}
+	}
+}

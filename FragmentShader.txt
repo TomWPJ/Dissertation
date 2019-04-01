@@ -1,0 +1,13 @@
+#version 430
+out vec4 FragColor;
+in float vertexDensity;
+uniform vec4 materialColor;
+
+void main(){
+	float colorMult = vertexDensity;
+	vec4 newColor = materialColor;
+	newColor *= colorMult;
+	
+	if (materialColor.a == -1.0f) FragColor = vec4(0.5f, 0.5f, 0.5f,1.0f);
+	else FragColor = newColor;
+}

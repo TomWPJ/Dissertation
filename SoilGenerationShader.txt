@@ -1,0 +1,55 @@
+#version 430
+
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(r32f) uniform writeonly image3D densityTexOut;
+layout(rgba32f) uniform writeonly image3D velocityTexOut;
+uniform int GRID_SIZE;
+uniform int SPHERE_RAD;
+uniform int genType;
+
+
+float rand(vec3 co){
+    return fract(sin(dot(co.xyz ,vec3(12.9898,78.233,143.4762))) * 43758.5453);
+}
+
+highp float rand2(vec3 co)
+{
+    highp float a = 12.9898;
+    highp float b = 78.233;
+	highp float d = 143.4762;
+    highp float c = 43758.5453;
+    highp float dt= dot(co.xyz ,vec3(a,b,d));
+    highp float sn= mod(dt,3.14);
+    return fract(sin(sn) * c);
+}
+
+void main() {
+	//int SPHERE_RAD = GRID_SIZE/8;
+	int h = GRID_SIZE/2;
+	ivec3 storePos = ivec3(gl_GlobalInvocationID.xyz);
+	float densityVal = 0.0f;
+	vec3 velocityVal = vec3(0.0f,0.0f,0.0f);
+	vec3 seedVal = vec3(float(gl_GlobalInvocationID.x),float(gl_GlobalInvocationID.y),float(gl_GlobalInvocationID.z));
+	if (genType == 2){
+		int randBound = (GRID_SIZE/2+1)-SPHERE_RAD;
+		if (gl_GlobalInvocationID.x > randBound && gl_GlobalInvocationID.x < GRID_SIZE-randBound && gl_GlobalInvocationID.z > randBound && gl_GlobalInvocationID.z < GRID_SIZE-randBound && gl_GlobalInvocationID.y > randBound && gl_GlobalInvocationID.y < GRID_SIZE-randBound){
+			imageStore(densityTexOut, storePos, vec4(rand2(seedVal), 0.0f, 0.0f,0.0f ));
+		}
+		else imageStore(densityTexOut, storePos, vec4(0.0f, 0.0f, 0.0f,0.0f ));
+		
+	}
+	else if (genType == 1) {
+		float sVal = ((gl_GlobalInvocationID.x-h)*(gl_GlobalInvocationID.x-h))+((gl_GlobalInvocationID.y-h)*(gl_GlobalInvocationID.y-h))+((gl_GlobalInvocationID.z-h)*(gl_GlobalInvocationID.z-h));
+		if (sVal < SPHERE_RAD*SPHERE_RAD) densityVal = (SPHERE_RAD*SPHERE_RAD-sVal)/(SPHERE_RAD*SPHERE_RAD);
+		imageStore(densityTexOut, storePos, vec4(densityVal, 0.0f, 0.0f,0.0f ));
+	}
+	else if (genType == 0) {
+		float fracVal = SPHERE_RAD*SPHERE_RAD - (SPHERE_RAD-1)*(SPHERE_RAD-1);
+		float sVal = ((gl_GlobalInvocationID.x-h)*(gl_GlobalInvocationID.x-h))+((gl_GlobalInvocationID.y-h)*(gl_GlobalInvocationID.y-h))+((gl_GlobalInvocationID.z-h)*(gl_GlobalInvocationID.z-h));
+		if (sVal <= (SPHERE_RAD-1)*(SPHERE_RAD-1)) densityVal = 1.0f;
+		if (sVal > (SPHERE_RAD-1)*(SPHERE_RAD-1) && sVal < SPHERE_RAD*SPHERE_RAD) densityVal = (sVal-((SPHERE_RAD-1)*(SPHERE_RAD-1)))/fracVal;
+		imageStore(densityTexOut, storePos, vec4(densityVal, 0.0f, 0.0f,0.0f ));
+	}
+	
+	imageStore(velocityTexOut, storePos, vec4(velocityVal,0.0f ));
+}
